@@ -475,20 +475,26 @@ tfoot td.dim { color: var(--t4); font-weight: 400; }
 }
 
 /* ============================================================
-   EVOLUCIÓN POR ANUNCIO — toolbar de selectores
+   EVOLUCIÓN POR ANUNCIO — toolbar de badges multi-selección
    ============================================================ */
 .anc-toolbar {
-  display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  display: flex; flex-direction: column; gap: 10px;
   margin-bottom: 18px; padding-bottom: 14px;
   border-bottom: 1px solid var(--bdr);
 }
-.anc-ctrl-group {
-  display: flex; align-items: center; gap: 8px;
+/* Una fila = label fijo + badges que envuelven libremente */
+.anc-filter-row {
+  display: flex; align-items: flex-start; gap: 14px;
 }
 .anc-lbl {
   font-family: var(--mono); font-size: 10px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--t4);
-  white-space: nowrap;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--t4);
+  white-space: nowrap; flex-shrink: 0;
+  min-width: 80px; padding-top: 5px;
+}
+/* Contenedor de badges — wrap libre, sin clip */
+.anc-badges {
+  display: flex; gap: 7px; flex-wrap: wrap;
 }
 </style>
 </head>
@@ -643,15 +649,15 @@ tfoot td.dim { color: var(--t4); font-weight: 400; }
       </div>
       <div class="chart-card">
         <div class="anc-toolbar">
-          <div class="anc-ctrl-group">
+          <div class="anc-filter-row">
             <span class="anc-lbl">GRUPO</span>
-            <select class="sel" id="sel-anc-grp" onchange="updateAncGrpSel()"></select>
+            <div class="anc-badges" id="anc-grp-badges"></div>
           </div>
-          <div class="anc-ctrl-group">
+          <div class="anc-filter-row">
             <span class="anc-lbl">ANUNCIO</span>
-            <select class="sel" id="sel-anc-anc" onchange="renderAnuncioChart()"></select>
+            <div class="anc-badges" id="anc-anc-badges"></div>
           </div>
-          <div class="anc-ctrl-group">
+          <div class="anc-filter-row">
             <span class="anc-lbl">MÉTRICA</span>
             <select class="sel" id="sel-anc-metric" onchange="renderAnuncioChart()">
               <option value="inv">Inversión</option>
@@ -1485,41 +1491,84 @@ const LINE_COLORS = [
   '#14b8a6','#f59e0b','#8b5cf6','#10b981','#ef4444',
 ];
 
-/** Pobla el selector de grupo y dispara updateAncGrpSel. Llamado desde buildBadges(). */
+// ── Estado de selección del gráfico por anuncio ───────────────────────────────
+// Sets vacíos = TODOS (mismo patrón que semana en los badge-filters globales)
+const ANC_STATE = { grps: new Set(), ancs: new Set() };
+
+/** Inicializa los badges de grupo y anuncio. Llamado desde buildBadges(). */
 function initAnuncioChart() {
-  const grpSel = document.getElementById('sel-anc-grp');
-  const grps   = ['ALL', ...new Set(S.raw.map(r => r.grp).filter(Boolean).sort())];
-  grpSel.innerHTML = grps.map(g =>
-    `<option value="${g}">${g === 'ALL' ? 'Todos los grupos' : g}</option>`
-  ).join('');
-  updateAncGrpSel();
+  ANC_STATE.grps = new Set();
+  ANC_STATE.ancs = new Set();
+  buildAncGrpBadges();
 }
 
-/** Al cambiar de grupo: repobla el selector de anuncio y re-renderiza. */
-function updateAncGrpSel() {
-  const grp    = document.getElementById('sel-anc-grp').value;
-  const ancSel = document.getElementById('sel-anc-anc');
-  const rows   = grp === 'ALL' ? S.raw : S.raw.filter(r => r.grp === grp);
-  const ancs   = ['ALL', ...new Set(rows.map(r => r.anc).filter(Boolean).sort())];
-  ancSel.innerHTML = ancs.map(a =>
-    `<option value="${a}">${a === 'ALL' ? 'Todos los anuncios' : a}</option>`
-  ).join('');
-  renderAnuncioChart();
+/** Construye los badges de GRUPO con multi-selección. */
+function buildAncGrpBadges() {
+  const el   = document.getElementById('anc-grp-badges');
+  const grps = [...new Set(S.raw.map(r => r.grp).filter(Boolean).sort())];
+  el.innerHTML = '';
+  ['ALL', ...grps].forEach(g => {
+    const span = document.createElement('span');
+    span.className = 'badge';
+    span.textContent = g === 'ALL' ? 'TODOS' : g;
+    const isActive = g === 'ALL' ? ANC_STATE.grps.size === 0 : ANC_STATE.grps.has(g);
+    if (isActive) span.classList.add('act-a');
+    span.addEventListener('click', () => {
+      if (g === 'ALL') {
+        ANC_STATE.grps = new Set();
+      } else {
+        if (ANC_STATE.grps.has(g)) ANC_STATE.grps.delete(g);
+        else ANC_STATE.grps.add(g);
+      }
+      ANC_STATE.ancs = new Set();   // reset anuncios al cambiar grupos
+      buildAncGrpBadges();
+      buildAncAncBadges();
+      renderAnuncioChart();
+    });
+    el.appendChild(span);
+  });
+  buildAncAncBadges();   // sincronizar anuncios con el estado de grupos
 }
 
-/** Renderiza el gráfico de líneas por anuncio según los selectores activos. */
+/** Construye los badges de ANUNCIO, filtrados por los grupos seleccionados. */
+function buildAncAncBadges() {
+  const el   = document.getElementById('anc-anc-badges');
+  let   rows = S.raw;
+  if (ANC_STATE.grps.size > 0) rows = rows.filter(r => ANC_STATE.grps.has(r.grp));
+  const ancs = [...new Set(rows.map(r => r.anc).filter(Boolean).sort())];
+  el.innerHTML = '';
+  ['ALL', ...ancs].forEach(a => {
+    const span = document.createElement('span');
+    span.className = 'badge';
+    span.textContent = a === 'ALL' ? 'TODOS' : a;
+    const isActive = a === 'ALL' ? ANC_STATE.ancs.size === 0 : ANC_STATE.ancs.has(a);
+    if (isActive) span.classList.add('act-c');
+    span.addEventListener('click', () => {
+      if (a === 'ALL') {
+        ANC_STATE.ancs = new Set();
+      } else {
+        if (ANC_STATE.ancs.has(a)) ANC_STATE.ancs.delete(a);
+        else ANC_STATE.ancs.add(a);
+      }
+      buildAncAncBadges();
+      renderAnuncioChart();
+    });
+    el.appendChild(span);
+  });
+}
+
+/** Renderiza el gráfico de líneas con los grupos/anuncios/métrica activos. */
 function renderAnuncioChart() {
-  const grp    = document.getElementById('sel-anc-grp').value;
-  const anc    = document.getElementById('sel-anc-anc').value;
   const metric = document.getElementById('sel-anc-metric').value;
 
-  // Fuente: S.raw — independiente de los badge-filters del dashboard
+  // Fuente: S.raw, filtrado por grupos seleccionados
   let rows = S.raw;
-  if (grp !== 'ALL') rows = rows.filter(r => r.grp === grp);
+  if (ANC_STATE.grps.size > 0) rows = rows.filter(r => ANC_STATE.grps.has(r.grp));
 
   const sems = [...new Set(rows.map(r => r.sem))].filter(Boolean).sort();
   let   ancs = [...new Set(rows.map(r => r.anc))].filter(Boolean).sort();
-  if (anc !== 'ALL') ancs = ancs.filter(a => a === anc);
+  // Aplicar filtro de anuncios seleccionados
+  if (ANC_STATE.ancs.size > 0) ancs = ancs.filter(a => ANC_STATE.ancs.has(a));
 
   const metricLabel = { inv:'Inversión ($)', leads:'Leads', lc:'Leads Calificados' }[metric];
   const tickFmt = metric === 'inv'
