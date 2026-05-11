@@ -473,6 +473,23 @@ tfoot td.dim { color: var(--t4); font-weight: 400; }
   #kpi-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .nav-pills { display: none; }
 }
+
+/* ============================================================
+   EVOLUCIÓN POR ANUNCIO — toolbar de selectores
+   ============================================================ */
+.anc-toolbar {
+  display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  margin-bottom: 18px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--bdr);
+}
+.anc-ctrl-group {
+  display: flex; align-items: center; gap: 8px;
+}
+.anc-lbl {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--t4);
+  white-space: nowrap;
+}
 </style>
 </head>
 <body>
@@ -618,6 +635,35 @@ tfoot td.dim { color: var(--t4); font-weight: 400; }
       </div>
     </section>
 
+    <!-- EVOLUCIÓN POR ANUNCIO -->
+    <section>
+      <div class="sec-hdr">
+        <span class="sec-ttl">Evolución Temporal por Anuncio</span>
+        <span class="sec-meta" id="anc-chart-meta">─</span>
+      </div>
+      <div class="chart-card">
+        <div class="anc-toolbar">
+          <div class="anc-ctrl-group">
+            <span class="anc-lbl">GRUPO</span>
+            <select class="sel" id="sel-anc-grp" onchange="updateAncGrpSel()"></select>
+          </div>
+          <div class="anc-ctrl-group">
+            <span class="anc-lbl">ANUNCIO</span>
+            <select class="sel" id="sel-anc-anc" onchange="renderAnuncioChart()"></select>
+          </div>
+          <div class="anc-ctrl-group">
+            <span class="anc-lbl">MÉTRICA</span>
+            <select class="sel" id="sel-anc-metric" onchange="renderAnuncioChart()">
+              <option value="inv">Inversión</option>
+              <option value="leads">Leads</option>
+              <option value="lc">Leads Calificados</option>
+            </select>
+          </div>
+        </div>
+        <div class="chart-wrap" style="height:320px"><canvas id="c-anuncio"></canvas></div>
+      </div>
+    </section>
+
   </div><!-- /main -->
 </div><!-- /dashboard -->
 
@@ -649,8 +695,8 @@ const S = {
   sortKey:  null,
   sortDir:  'desc',
   compact:  false,
-  filters: { platform:'ALL', campaign:'ALL', grupo:'ALL', semana:'ALL' },
-  charts:   { trend: null, donut: null },
+  filters: { platform:'ALL', campaign:'ALL', grupo:'ALL', semana: new Set() },
+  charts:   { trend: null, donut: null, anuncio: null },
 };
 
 // ── Google Sheets URLs ───────────────────────────────────────────────────────
@@ -897,20 +943,42 @@ function buildBadges() {
   makeBadges('f-campaign', cams, 'campaign');
   makeBadges('f-grupo',    grps, 'grupo');
   makeBadges('f-semana',   sems, 'semana');
+  initAnuncioChart();  // poblar selectores del gráfico por anuncio
 }
 
 function makeBadges(id, vals, key) {
   const el = document.getElementById(id);
   el.innerHTML = '';
-  const colorMap = BADGE_COLORS[key] || {};
+  const colorMap  = BADGE_COLORS[key] || {};
+  const isMulti   = key === 'semana';          // semana permite selección múltiple
+
   vals.forEach(v => {
     const span = document.createElement('span');
     span.className = 'badge';
     span.textContent = v === 'ALL' ? 'TODOS' : v;
     const activeClass = colorMap[v] || colorMap.default || 'act';
-    if (S.filters[key] === v) span.classList.add(activeClass);
+
+    // ── Determinar si el badge está activo ──────────────────────────────────
+    const isActive = isMulti
+      ? (v === 'ALL' ? S.filters.semana.size === 0 : S.filters.semana.has(v))
+      : S.filters[key] === v;
+    if (isActive) span.classList.add(activeClass);
+
     span.addEventListener('click', () => {
-      S.filters[key] = v;
+      if (isMulti) {
+        if (v === 'ALL') {
+          S.filters.semana = new Set();           // TODOS → limpiar selección
+        } else {
+          if (S.filters.semana.has(v)) {
+            S.filters.semana.delete(v);           // toggle off
+            // Si ya no queda ninguna semana seleccionada → equivale a TODOS
+          } else {
+            S.filters.semana.add(v);              // toggle on
+          }
+        }
+      } else {
+        S.filters[key] = v;
+      }
       makeBadges(id, vals, key);
       applyFilters();
     });
@@ -922,10 +990,10 @@ function makeBadges(id, vals, key) {
 function applyFilters() {
   const { platform, campaign, grupo, semana } = S.filters;
   S.filtered = S.raw.filter(r => {
-    if (platform !== 'ALL' && r.plt !== platform) return false;
-    if (campaign !== 'ALL' && r.cam !== campaign) return false;
-    if (grupo    !== 'ALL' && r.grp !== grupo)    return false;
-    if (semana   !== 'ALL' && r.sem !== semana)   return false;
+    if (platform !== 'ALL' && r.plt !== platform)   return false;
+    if (campaign !== 'ALL' && r.cam !== campaign)   return false;
+    if (grupo    !== 'ALL' && r.grp !== grupo)      return false;
+    if (semana.size > 0    && !semana.has(r.sem))   return false;  // Set: vacío = TODOS
     return true;
   });
   renderKPIs();
@@ -1408,6 +1476,138 @@ function updateStatusBar() {
   document.getElementById('sb-weeks').textContent = `${sems.size} semanas activas`;
   document.getElementById('sb-plats').textContent = `${plts.size} plataformas`;
   document.getElementById('sb-ts').textContent    = new Date().toLocaleTimeString('es-CL');
+}
+
+// ── Evolución por Anuncio ─────────────────────────────────────────────────────
+const LINE_COLORS = [
+  '#1d6fd8','#059669','#dc2626','#d97706','#7c3aed',
+  '#0891b2','#db2777','#65a30d','#ea580c','#6366f1',
+  '#14b8a6','#f59e0b','#8b5cf6','#10b981','#ef4444',
+];
+
+/** Pobla el selector de grupo y dispara updateAncGrpSel. Llamado desde buildBadges(). */
+function initAnuncioChart() {
+  const grpSel = document.getElementById('sel-anc-grp');
+  const grps   = ['ALL', ...new Set(S.raw.map(r => r.grp).filter(Boolean).sort())];
+  grpSel.innerHTML = grps.map(g =>
+    `<option value="${g}">${g === 'ALL' ? 'Todos los grupos' : g}</option>`
+  ).join('');
+  updateAncGrpSel();
+}
+
+/** Al cambiar de grupo: repobla el selector de anuncio y re-renderiza. */
+function updateAncGrpSel() {
+  const grp    = document.getElementById('sel-anc-grp').value;
+  const ancSel = document.getElementById('sel-anc-anc');
+  const rows   = grp === 'ALL' ? S.raw : S.raw.filter(r => r.grp === grp);
+  const ancs   = ['ALL', ...new Set(rows.map(r => r.anc).filter(Boolean).sort())];
+  ancSel.innerHTML = ancs.map(a =>
+    `<option value="${a}">${a === 'ALL' ? 'Todos los anuncios' : a}</option>`
+  ).join('');
+  renderAnuncioChart();
+}
+
+/** Renderiza el gráfico de líneas por anuncio según los selectores activos. */
+function renderAnuncioChart() {
+  const grp    = document.getElementById('sel-anc-grp').value;
+  const anc    = document.getElementById('sel-anc-anc').value;
+  const metric = document.getElementById('sel-anc-metric').value;
+
+  // Fuente: S.raw — independiente de los badge-filters del dashboard
+  let rows = S.raw;
+  if (grp !== 'ALL') rows = rows.filter(r => r.grp === grp);
+
+  const sems = [...new Set(rows.map(r => r.sem))].filter(Boolean).sort();
+  let   ancs = [...new Set(rows.map(r => r.anc))].filter(Boolean).sort();
+  if (anc !== 'ALL') ancs = ancs.filter(a => a === anc);
+
+  const metricLabel = { inv:'Inversión ($)', leads:'Leads', lc:'Leads Calificados' }[metric];
+  const tickFmt = metric === 'inv'
+    ? v => `$${v >= 1000 ? (v/1000).toFixed(0)+'K' : v}`
+    : v => v;
+
+  const datasets = ancs.map((a, i) => {
+    const color = LINE_COLORS[i % LINE_COLORS.length];
+    const data  = sems.map(s => {
+      const sub = rows.filter(x => x.sem === s && x.anc === a);
+      return sub.length ? aggRows(sub)[metric] : null;
+    });
+    return {
+      label: a,
+      data,
+      borderColor: color,
+      backgroundColor: 'transparent',
+      borderWidth: 1.8,
+      pointRadius: 3,
+      pointHoverRadius: 6,
+      tension: 0.3,
+      spanGaps: true,
+    };
+  });
+
+  const labels = sems.map(s => {
+    const d = new Date(s + 'T00:00:00');
+    return isNaN(d.getTime()) ? s
+      : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+  });
+
+  const nAncs = ancs.length;
+  document.getElementById('anc-chart-meta').textContent =
+    `${nAncs} anuncio${nAncs !== 1 ? 's' : ''} · ${sems.length} semana${sems.length !== 1 ? 's' : ''}`;
+
+  const ctx = document.getElementById('c-anuncio').getContext('2d');
+  if (S.charts.anuncio) S.charts.anuncio.destroy();
+
+  S.charts.anuncio = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      animation: { duration: 400 },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#374151',
+            font: { family:"'JetBrains Mono', monospace", size: 9 },
+            boxWidth: 12, padding: 10,
+            // Ocultar leyenda si hay demasiados anuncios (> 12)
+            filter: (_, i) => nAncs <= 12 || i < 12,
+          }
+        },
+        tooltip: {
+          backgroundColor: '#ffffff', borderColor: '#e2e5eb', borderWidth: 1,
+          titleColor: '#111827', bodyColor: '#374151',
+          titleFont: { family:"'JetBrains Mono', monospace", size: 10 },
+          bodyFont:  { family:"'JetBrains Mono', monospace", size: 10 },
+          padding: 10,
+          callbacks: {
+            label: ctx => {
+              const v = ctx.raw;
+              if (v == null) return null;
+              const str = metric === 'inv'
+                ? `$${Math.round(v).toLocaleString('es-CL')}`
+                : Math.round(v).toLocaleString('es-CL');
+              return ` ${ctx.dataset.label}: ${str}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(226,229,235,.9)' },
+          ticks: { color: '#6b7280', font: { family:"'JetBrains Mono', monospace", size: 8 }, maxRotation: 45 }
+        },
+        y: {
+          grid: { color: 'rgba(226,229,235,.9)' },
+          beginAtZero: true,
+          title: { display: true, text: metricLabel, color: '#6b7280', font: { family:"'JetBrains Mono', monospace", size: 9 } },
+          ticks: { color: '#6b7280', font: { family:"'JetBrains Mono', monospace", size: 8 }, callback: tickFmt }
+        }
+      }
+    }
+  });
 }
 
 // ── Loading helpers ───────────────────────────────────────────────────────────
