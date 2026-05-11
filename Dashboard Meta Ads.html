@@ -728,13 +728,16 @@ async function initDashboard() {
     S.raw     = parseData(txtData);
 
     setMsg('CONSTRUYENDO DASHBOARD...');
+    // Mostrar el dashboard ANTES de renderizar los gráficos.
+    // Chart.js necesita que el canvas tenga dimensiones reales (> 0×0).
+    // Si #dashboard está en display:none, el canvas mide 0px y el gráfico
+    // se crea invisible. El overlay de carga cubre la pantalla durante este tick.
+    document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('statusbar').style.display = 'flex';
     await tick();
     buildBadges();
     applyFilters();
     updateNav();
-
-    document.getElementById('dashboard').style.display = 'block';
-    document.getElementById('statusbar').style.display = 'flex';
     hideLoading();
   } catch (err) {
     hideLoading();
