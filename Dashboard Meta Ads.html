@@ -523,6 +523,65 @@ tfoot td.dim { color: var(--t4); font-weight: 400; }
 }
 
 /* ============================================================
+   LOGIN SCREEN
+   ============================================================ */
+#login-screen {
+  display: none; position: fixed; inset: 0; z-index: 99999;
+  background: var(--bg0);
+  flex-direction: column; align-items: center; justify-content: center; gap: 0;
+}
+.login-box {
+  background: var(--bg1); border: 1px solid var(--bdr);
+  border-radius: 8px; padding: 48px 44px; width: 100%; max-width: 380px;
+  display: flex; flex-direction: column; gap: 20px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.08);
+}
+.login-logo {
+  font-family: var(--mono); font-size: 13px; font-weight: 700;
+  letter-spacing: .12em; color: var(--t3); text-align: center;
+}
+.login-title {
+  font-family: var(--mono); font-size: 22px; font-weight: 700;
+  color: var(--t1); text-align: center; margin-top: -4px;
+}
+.login-field { display: flex; flex-direction: column; gap: 7px; }
+.login-label {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--t4);
+}
+.login-input {
+  background: var(--bg3); border: 1.5px solid var(--bdr2);
+  border-radius: var(--r); padding: 11px 14px;
+  font-family: var(--mono); font-size: 14px; color: var(--t1);
+  outline: none; transition: border-color .15s; width: 100%;
+}
+.login-input:focus { border-color: var(--blue); background: var(--bg1); }
+.login-btn {
+  background: var(--blue); color: #fff; border: none;
+  border-radius: var(--r); padding: 13px;
+  font-family: var(--mono); font-size: 13px; font-weight: 700;
+  letter-spacing: .08em; cursor: pointer; transition: background .15s;
+}
+.login-btn:hover { background: #155ec0; }
+.login-err {
+  font-family: var(--mono); font-size: 11px; color: var(--red);
+  text-align: center; min-height: 16px;
+}
+.login-footer {
+  font-family: var(--mono); font-size: 10px; color: var(--t4);
+  text-align: center; margin-top: 4px;
+}
+/* Logout button — in nav */
+#btn-logout {
+  padding: 4px 12px; border: 1.5px solid var(--bdr); border-radius: var(--r);
+  background: transparent; color: var(--t3);
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: .07em; cursor: pointer; transition: all .12s; height: 32px;
+  white-space: nowrap;
+}
+#btn-logout:hover { border-color: var(--red); color: var(--red); }
+
+/* ============================================================
    EVOLUCIÓN POR ANUNCIO — toolbar de badges multi-selección
    ============================================================ */
 .anc-toolbar {
@@ -548,6 +607,23 @@ tfoot td.dim { color: var(--t4); font-weight: 400; }
 </head>
 <body>
 
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">META ADS · BI TERMINAL</div>
+    <div class="login-title">Acceso al Panel</div>
+    <div class="login-field">
+      <span class="login-label">Contraseña</span>
+      <input class="login-input" id="login-pwd" type="password"
+             placeholder="••••••••" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter') doLogin()">
+    </div>
+    <button class="login-btn" onclick="doLogin()">INGRESAR →</button>
+    <div class="login-err" id="login-err"></div>
+    <div class="login-footer">🔒 Acceso restringido</div>
+  </div>
+</div>
+
 <!-- LOADING -->
 <div id="loading">
   <div class="ld-spinner"></div>
@@ -569,6 +645,7 @@ tfoot td.dim { color: var(--t4); font-weight: 400; }
       <div class="nav-pill">ÚLTIMA SEM. <span id="np-lastsem">─</span></div>
     </div>
     <button class="btn-sm" id="btn-refresh" onclick="initDashboard()" title="Recargar datos desde Google Sheets" style="border-color:var(--blue);color:var(--blue);white-space:nowrap">⟳ ACTUALIZAR</button>
+    <button id="btn-logout" onclick="doLogout()" title="Cerrar sesión">⏻ SALIR</button>
   </div>
 </nav>
 
@@ -906,8 +983,47 @@ async function initDashboard() {
 
 function tick() { return new Promise(r => setTimeout(r, 12)); }
 
+// ── Auth — Login / Logout ─────────────────────────────────────────────────────
+const AUTH_KEY = 'meta_bi_auth';
+const AUTH_PWD = 'admin123';
+
+function doLogin() {
+  const pwd = document.getElementById('login-pwd').value;
+  const err = document.getElementById('login-err');
+  if (pwd === AUTH_PWD) {
+    sessionStorage.setItem(AUTH_KEY, '1');
+    document.getElementById('login-screen').style.display = 'none';
+    err.textContent = '';
+    initDashboard();
+  } else {
+    err.textContent = 'Contraseña incorrecta';
+    document.getElementById('login-pwd').value = '';
+    document.getElementById('login-pwd').focus();
+  }
+}
+
+function doLogout() {
+  sessionStorage.removeItem(AUTH_KEY);
+  // Ocultar panel y resetear estado
+  document.getElementById('dashboard').style.display  = 'none';
+  document.getElementById('statusbar').style.display  = 'none';
+  document.getElementById('upload-screen').style.display = 'none';
+  S.raw = []; S.filtered = []; S.targets = {};
+  // Mostrar login
+  document.getElementById('login-pwd').value = '';
+  document.getElementById('login-err').textContent = '';
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
 // ── Auto-inicialización al cargar la página ──────────────────────────────────
-document.addEventListener('DOMContentLoaded', initDashboard);
+document.addEventListener('DOMContentLoaded', () => {
+  if (sessionStorage.getItem(AUTH_KEY) === '1') {
+    initDashboard();   // sesión activa en esta pestaña
+  } else {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('login-pwd').focus();
+  }
+});
 
 // ── Number Parsers ───────────────────────────────────────────────────────────
 /**
