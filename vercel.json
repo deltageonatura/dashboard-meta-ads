@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "Dashboard Meta Ads.html",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/Dashboard Meta Ads.html"
+    },
+    {
+      "src": "/Dashboard%20Meta%20Ads.html",
+      "dest": "/Dashboard Meta Ads.html"
+    }
+  ]
+}
